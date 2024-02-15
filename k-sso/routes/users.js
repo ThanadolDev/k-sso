@@ -2,45 +2,62 @@ var express = require("express");
 var router = express.Router();
 const axios = require("axios");
 var passport = require("passport");
-const crypto = require('crypto');
-var Strategy = require("passport-http-bearer").Strategy;
+const crypto = require("crypto");
+const { Strategy: JwtStrategy, ExtractJwt } = require('passport-jwt');
+const { Strategy: BearerStrategy } = require('passport-http-bearer');
 const bodyParser = require("body-parser");
+const jwt = require("jsonwebtoken");
 router.use(bodyParser.json());
 
+const jwtOptions = {
+  jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+  secretOrKey: 'your_secret_key'
+};
 router.get("/", function (req, res, next) {
   res.send("respond with a resource");
 });
 
-passport.use(
-  new Strategy(function (token, done) {
-    // axios.post('https://api.nitisakc.dev/auth/verify', { token })
-    //   .then(response => {
-    //     const user = response.data;
-    //     done(null, user);
-    //   })
-    //   .catch(error => {
-    //     done(error);
-    //   });
-  })
-);
+passport.use(new JwtStrategy(jwtOptions, function(jwtPayload, done) {
+  // Extract user information from the JWT payload
+  const user = jwtPayload; // Assuming jwtPayload contains the user information
+
+  // Pass user object to the next middleware or route handler along with JWT payload
+  done(null, { user, jwtPayload });
+}));
+
 
 router.post("/login", function (req, res) {
   console.log(req.body);
-  const { user, password } = req.body;
-  if (!user || !password) {
+  const { usr, pwd } = req.body;
+  if (!usr || !pwd) {
     return res.status(400).send("Missing ID or password");
   }
   axios
-    .post("https://api.nitisakc.dev/auth/login", { user, password })
-    .then((loginResponse) => {
-      const token = loginResponse.data.token;
-      return axios.post("https://api.nitisakc.dev/auth/verify", { token });
+    .post("https://api.nitisakc.dev/auth/login", req.body)
+    .then(async (loginResponse) => {
+      const token = loginResponse.data.accessToken;
+      console.log(token);
+      // Verify the token
+      const verifyResponse = await axios.post(
+        "https://api.nitisakc.dev/auth/verify",
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      console.log(verifyResponse.data);
+      const sessionToken = generateSessionToken(verifyResponse.data);
+      res.json(sessionToken);
     })
-    .then((verifyResponse) => {
-      const userData = verifyResponse.data;
-      const sessionToken = generateSessionToken(userData);
-      res.json({ sessionToken });
-    })
+    
+    // .then((verifyResponse) => {
+    //   const userData = verifyResponse;
+    //   console.log(userData)
+    //   // const sessionToken = generateSessionToken(userData);
+    //   // res.json({ res });
+    // })
     .catch((error) => {
       if (error.response) {
         if (error.response.status === 401) {
@@ -62,18 +79,16 @@ router.post("/login", function (req, res) {
     });
 });
 
-router.get("/auth",function (req, res) {
-  passport.authenticate('bearer', { session: false });
-  res.send('Authenticated');
-})
+
+router.get('/auth', passport.authenticate('jwt', { session: false }), function(req, res) {
+  const { jwtPayload } = req.user;
+  res.json({ jwtPayload });
+});
 
 function generateSessionToken(userData) {
-  const dataString = JSON.stringify(userData);
-
-  const hash = crypto.createHash('sha256');
-  hash.update(dataString);
-
-  const sessionToken = hash.digest('hex');
+  const dataString = userData;
+ console.log(dataString)
+  const sessionToken = jwt.sign(dataString, "your_secret_key");
 
   return sessionToken;
 }
@@ -83,8 +98,14 @@ router.post("/verify", function (req, res) {
   if (!token) {
     return res.status(400).send("Missing token");
   }
-  axios
-    .post(`https://api.nitisakc.dev/auth/verify`, { token })
+  axios.post(
+    "https://api.nitisakc.dev/auth/verify",
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  )
     .then((response) => {
       const user = response.data;
       res.json({ user });
@@ -105,6 +126,5 @@ router.post("/verify", function (req, res) {
       }
     });
 });
-
 
 module.exports = router;
