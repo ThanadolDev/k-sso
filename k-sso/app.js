@@ -40,4 +40,6 @@ app.use(function(err, req, res, next) {
   res.render('error');
 });
 
-module.exports = app;
+app.listen(7877, () => {
+  console.log(`Example app listening on port 7877`)
+})
